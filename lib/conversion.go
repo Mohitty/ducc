@@ -352,6 +352,14 @@ func ConvertWish(wish WishFriendly, convertAgain, forceDownload, convertSingular
 				return errRemoveSchedule
 			}
 		}
+
+		//Create Podman Store
+		err = inputImage.CreatePodmanImageStore(wish.CvmfsRepo, subDirInsideRepo)
+		if err != nil {
+			LogE(err).Warning("Unable to create Podman additional image store")
+			return err
+		}
+		
 		if errIng == nil && errRemoveSchedule == nil {
 			Log().Info("Conversion completed")
 			return nil
