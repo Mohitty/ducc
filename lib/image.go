@@ -240,8 +240,7 @@ type Singularity struct {
 }
 
 func (img Image) DownloadSingularityDirectory(rootPath string) (sing Singularity, err error) {
-	//dir, err := ioutil.TempDir(rootPath, "singularity_buffer")
-	dir := filepath.Join(rootPath, "sing_buff123")
+	dir, err := ioutil.TempDir(rootPath, "singularity_buffer")
 	if err != nil {
 		LogE(err).Error("Error in creating temporary directory for singularity")
 		return
