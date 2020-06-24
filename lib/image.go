@@ -1,8 +1,10 @@
 package lib
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +15,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/docker/docker/image"
 	"github.com/olekukonko/tablewriter"
@@ -237,7 +240,8 @@ type Singularity struct {
 }
 
 func (img Image) DownloadSingularityDirectory(rootPath string) (sing Singularity, err error) {
-	dir, err := ioutil.TempDir(rootPath, "singularity_buffer")
+	//dir, err := ioutil.TempDir(rootPath, "singularity_buffer")
+	dir := filepath.Join(rootPath, "sing_buff123")
 	if err != nil {
 		LogE(err).Error("Error in creating temporary directory for singularity")
 		return
@@ -522,7 +526,11 @@ func (img Image) downloadLayer(layer da.Layer, token, rootPath string) (toSend d
 				continue
 			}
 
-			toSend = downloadedLayer{Name: layer.Digest, Path: gread}
+			path, err := computeLayerInfo(layer, gread)
+			if err != nil {
+				return toSend, err
+			}
+			toSend = downloadedLayer{Name: layer.Digest, Path: path}
 			return toSend, nil
 
 		} else {
@@ -531,7 +539,57 @@ func (img Image) downloadLayer(layer da.Layer, token, rootPath string) (toSend d
 		}
 	}
 	return
+}
 
+type ReadCloserBuffer struct {
+	*bytes.Buffer
+}
+
+func (cb ReadCloserBuffer) Close() (err error) {
+	return
+} 
+
+func computeLayerInfo(layer da.Layer, in io.ReadCloser) (path io.ReadCloser, err error) {
+	Log().WithFields(log.Fields{"action": "Computing the layer info"}).Info(layer.Digest)
+	hash := sha256.New()
+
+	var forDigest, forPath bytes.Buffer
+	n, err := io.Copy(&forDigest, in)
+	if err != nil {
+		LogE(err).Warning("Error in reading the layer from gzip")
+		return
+	}
+	for n > 0 {
+		n, err = io.Copy(&forDigest, in)
+		if err != nil {
+			LogE(err).Error("Error in reading layer from buffer")
+			return
+		}
+	}
+	forPath = forDigest
+	path = ReadCloserBuffer{&forPath}
+	size, err := io.Copy(hash, &forDigest)
+	if err != nil {
+		LogE(err).Warning("Error in computing uncompressed layer digest (diffid)")
+		return
+	}
+
+	diffID := fmt.Sprintf("%x",hash.Sum(nil))
+	created := time.Now()
+
+	layerinfo := LayerInfo{
+		ID: diffID,
+		Created: created,
+		CompressedDiffDigest: layer.Digest,
+		CompressedSize: layer.Size,
+		UncompressedDigest: "sha256:" + diffID,
+		UncompressedSize: size,
+	}
+
+	LayerInfoMap[layer.Digest] = layerinfo
+	LayerMetadata = append(LayerMetadata, layerinfo)
+
+	return 
 }
 
 func parseBearerToken(token string) (realm string, options map[string]string, err error) {
